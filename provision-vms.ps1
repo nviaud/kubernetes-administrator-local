@@ -204,11 +204,23 @@ VBoxManage startvm k8s-worker2 --type gui
 
 Write-Host ""
 Write-Host "=== VMs Started ===" -ForegroundColor Green
-Write-Host "Please complete Ubuntu installation on each VM:" -ForegroundColor Cyan
-Write-Host "  - Username: k8s" -ForegroundColor White
-Write-Host "  - Password: k8s" -ForegroundColor White
-Write-Host "  - Enable OpenSSH Server" -ForegroundColor White
-Write-Host "  - Network: Use DHCP (default) - IPs will be assigned automatically:" -ForegroundColor White
-Write-Host "    - k8s-control: 192.168.56.10 (via DHCP reservation)" -ForegroundColor White
-Write-Host "    - k8s-worker1: 192.168.56.11 (via DHCP reservation)" -ForegroundColor White
-Write-Host "    - k8s-worker2: 192.168.56.12 (via DHCP reservation)" -ForegroundColor White
+Write-Host ""
+Write-Host "Please complete Ubuntu installation on EACH VM:" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "1. Set hostname:" -ForegroundColor Yellow
+Write-Host "   - k8s-control, k8s-worker1, or k8s-worker2" -ForegroundColor White
+Write-Host ""
+Write-Host "2. Create user account:" -ForegroundColor Yellow
+Write-Host "   - Username: k8s" -ForegroundColor White
+Write-Host "   - Password: k8s" -ForegroundColor White
+Write-Host ""
+Write-Host "3. Network: Use DHCP (default)" -ForegroundColor Yellow
+Write-Host "   IPs will be assigned automatically via DHCP reservations:" -ForegroundColor White
+Write-Host "   - k8s-control: 192.168.56.10" -ForegroundColor White
+Write-Host "   - k8s-worker1: 192.168.56.11" -ForegroundColor White
+Write-Host "   - k8s-worker2: 192.168.56.12" -ForegroundColor White
+Write-Host ""
+Write-Host "4. *** CRITICAL: Enable OpenSSH Server ***" -ForegroundColor Red
+Write-Host "   On 'Featured Server Snaps' screen, check [X] OpenSSH server" -ForegroundColor Red
+Write-Host "   Without SSH, Phase 2 configuration will fail!" -ForegroundColor Red
+Write-Host ""

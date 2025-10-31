@@ -283,27 +283,105 @@ VBoxManage startvm k8s-worker2 --type headless
 ```
 
 **Manual Installation Steps:**
-- Install Ubuntu Server 24.04.3 LTS on each VM
-- Enable OpenSSH Server during installation
-- Set hostnames during installation:
-  - Control plane: `k8s-control`
-  - Worker 1: `k8s-worker1`
-  - Worker 2: `k8s-worker2`
-- Create user account:
-  - Username: `k8s`
-  - Password: `k8s`
-- Network configuration: **Use DHCP (default)**
-  - The VMs will automatically receive their assigned IPs via DHCP reservations:
-    - k8s-control: 192.168.56.10
-    - k8s-worker1: 192.168.56.11
-    - k8s-worker2: 192.168.56.12
-  - No manual IP configuration needed!
+
+Complete the following steps on **EACH VM** (k8s-control, k8s-worker1, k8s-worker2):
+
+1. **Start Ubuntu Server 24.04.3 LTS installation**
+   - Select language and keyboard layout
+
+2. **Set hostname** (important - must match):
+   - Control plane: `k8s-control`
+   - Worker 1: `k8s-worker1`
+   - Worker 2: `k8s-worker2`
+
+3. **Network configuration**:
+   - **Use DHCP (default)** - Do NOT configure static IPs
+   - The VMs will automatically receive their reserved IPs:
+     - k8s-control: 192.168.56.10
+     - k8s-worker1: 192.168.56.11
+     - k8s-worker2: 192.168.56.12
+
+4. **Create user account**:
+   - Username: `k8s`
+   - Password: `k8s`
+   - Server name: (use hostname from step 2)
+
+5. **⚠️ CRITICAL: Enable OpenSSH Server**
+   - When you reach the "Featured Server Snaps" screen
+   - **YOU MUST check [X] OpenSSH server**
+   - Without this, SSH configuration in Phase 2 will fail!
+   - If you forget this step, you'll need to install SSH manually later
+
+6. **Complete installation**
+   - Wait for installation to finish
+   - Remove installation media when prompted
+   - Reboot
+
+**After Installation:**
+- Login with username `k8s` and password `k8s`
+- Verify SSH is running: `sudo systemctl status ssh`
+- Check IP address: `ip a` (should show 192.168.56.10/11/12)
 
 ---
 
-## Phase 2: SSH Configuration (Windows)
+## Phase 2: SSH Installation on Nodes (if needed)
 
-### Step 1: Verify OpenSSH Client
+**Skip this phase if you enabled OpenSSH server during Ubuntu installation.**
+
+If you forgot to enable OpenSSH during installation, you need to install it manually on each VM before proceeding with SSH configuration.
+
+### Verify SSH Status
+
+Login to each VM via the VirtualBox console and check if SSH is running:
+
+```bash
+# Check SSH service status
+sudo systemctl status ssh
+```
+
+If you see "Unit ssh.service could not be found", SSH is not installed.
+
+### Install OpenSSH Server
+
+Run the following commands on **EACH VM** (k8s-control, k8s-worker1, k8s-worker2):
+
+```bash
+# Update package list
+sudo apt update
+
+# Install OpenSSH server
+sudo apt install -y openssh-server
+
+# Enable SSH to start on boot
+sudo systemctl enable ssh
+
+# Start SSH service
+sudo systemctl start ssh
+
+# Verify SSH is running
+sudo systemctl status ssh
+```
+
+### Verify Installation
+
+After installing SSH on all nodes, verify connectivity from Windows:
+
+```powershell
+# Test SSH connectivity (from Windows PowerShell)
+ssh k8s@192.168.56.10 "echo 'k8s-control SSH OK'"
+ssh k8s@192.168.56.11 "echo 'k8s-worker1 SSH OK'"
+ssh k8s@192.168.56.12 "echo 'k8s-worker2 SSH OK'"
+```
+
+You should be prompted for the password (`k8s`) for each node.
+
+---
+
+## Phase 3: SSH Configuration (Windows)
+
+**Prerequisites**: Ensure all VMs have completed Ubuntu installation and OpenSSH server is running on each node.
+
+### Step 1: Verify OpenSSH Client on Windows
 
 ```powershell
 # Check if OpenSSH Client is installed
@@ -318,7 +396,24 @@ ssh -V
 
 **Note**: SSH keys are already included in the project repository (`.ssh/k8s_cluster_key` and `.ssh/k8s_cluster_key.pub`). This is a local training environment, so keys are committed to git for convenience.
 
-### Step 2: Copy SSH Keys to All Nodes
+### Step 2: Test SSH Connectivity (Optional but Recommended)
+
+Before copying SSH keys, verify that SSH server is running on each VM:
+
+```powershell
+# Test SSH connectivity to each node (you'll be prompted for password: k8s)
+ssh k8s@192.168.56.10 "echo 'k8s-control SSH OK' && exit"
+ssh k8s@192.168.56.11 "echo 'k8s-worker1 SSH OK' && exit"
+ssh k8s@192.168.56.12 "echo 'k8s-worker2 SSH OK' && exit"
+```
+
+**If SSH connection fails:**
+- Verify the VM is running and Ubuntu installation is complete
+- Check SSH is running on the VM: Login via VirtualBox console and run `sudo systemctl status ssh`
+- If SSH is not installed, see Phase 2: SSH Installation on Nodes
+- Verify IP addresses match: Run `ip a` on each VM
+
+### Step 3: Copy SSH Keys to All Nodes
 
 ```powershell
 # Define variables
@@ -335,7 +430,7 @@ Get-Content "$SSH_KEY_PATH.pub" | ssh "$K8S_USER@192.168.56.11" "mkdir -p ~/.ssh
 Get-Content "$SSH_KEY_PATH.pub" | ssh "$K8S_USER@192.168.56.12" "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
 ```
 
-### Step 3: Configure SSH Config File
+### Step 4: Configure SSH Config File
 
 ```powershell
 # Create or update SSH config in user's .ssh directory
@@ -377,7 +472,7 @@ Add-Content -Path "$sshConfigDir\config" -Value $sshConfig
 Write-Host "SSH config updated with project SSH key path" -ForegroundColor Green
 ```
 
-### Step 4: Test SSH Access
+### Step 5: Test SSH Access
 
 ```powershell
 # Test connection to control plane
@@ -390,7 +485,7 @@ ssh k8s-worker1 "hostname && ip a"
 ssh k8s-worker2 "hostname && ip a"
 ```
 
-### Step 5: Configure /etc/hosts on All Nodes
+### Step 6: Configure /etc/hosts on All Nodes
 
 ```powershell
 # Create hosts entries script
@@ -406,7 +501,7 @@ ssh k8s-worker1 "echo '$hostsEntries' | sudo tee -a /etc/hosts"
 ssh k8s-worker2 "echo '$hostsEntries' | sudo tee -a /etc/hosts"
 ```
 
-### Step 6: Configure Passwordless Sudo on All Nodes
+### Step 7: Configure Passwordless Sudo on All Nodes
 
 ```powershell
 # Configure passwordless sudo on all nodes
@@ -416,7 +511,7 @@ ssh k8s-worker1 "echo '$K8S_USER ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers
 ssh k8s-worker2 "echo '$K8S_USER ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/$K8S_USER && sudo chmod 0440 /etc/sudoers.d/$K8S_USER"
 ```
 
-### Step 7: Create PowerShell Helper Functions
+### Step 8: Create PowerShell Helper Functions
 
 ```powershell
 # Add to your PowerShell profile
@@ -447,7 +542,7 @@ Set-Alias -Name k8s-exec -Value Invoke-K8sClusterCommand
 # k8s-exec "sudo systemctl status kubelet"
 ```
 
-### Step 8: Add Windows Hosts File Entries (Optional)
+### Step 9: Add Windows Hosts File Entries (Optional)
 
 ```powershell
 # Run as Administrator
@@ -468,7 +563,7 @@ Get-Content $hostsPath | Select-String "k8s"
 
 ---
 
-## Phase 3: Shared Folder Configuration
+## Phase 4: Shared Folder Configuration
 
 ### Step 1: Install VirtualBox Guest Additions on All Nodes
 
@@ -658,7 +753,7 @@ function Copy-FromK8sCluster {
 
 ---
 
-## Phase 4: OS Configuration (Run on ALL Nodes via SSH)
+## Phase 5: OS Configuration (Run on ALL Nodes via SSH)
 
 ### Step 1: Update System on All Nodes
 
@@ -783,7 +878,7 @@ foreach ($node in $nodes) {
 
 ---
 
-## Phase 5: Initialize Kubernetes Cluster
+## Phase 6: Initialize Kubernetes Cluster
 
 ### Step 1: Initialize Control Plane
 
@@ -874,7 +969,7 @@ ssh k8s-control "kubectl label node k8s-worker2 node-role.kubernetes.io/worker=w
 
 ---
 
-## Phase 6: Post-Installation Configuration
+## Phase 7: Post-Installation Configuration
 
 ### Step 1: Copy kubeconfig to Windows
 
