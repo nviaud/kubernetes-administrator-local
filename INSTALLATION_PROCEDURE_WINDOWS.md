@@ -448,22 +448,19 @@ Host k8s-control
     HostName 192.168.56.10
     User k8s
     IdentityFile $SSH_KEY_PATH
-    StrictHostKeyChecking no
-    UserKnownHostsFile NUL
+    StrictHostKeyChecking accept-new
 
 Host k8s-worker1
     HostName 192.168.56.11
     User k8s
     IdentityFile $SSH_KEY_PATH
-    StrictHostKeyChecking no
-    UserKnownHostsFile NUL
+    StrictHostKeyChecking accept-new
 
 Host k8s-worker2
     HostName 192.168.56.12
     User k8s
     IdentityFile $SSH_KEY_PATH
-    StrictHostKeyChecking no
-    UserKnownHostsFile NUL
+    StrictHostKeyChecking accept-new
 "@
 
 # Add to SSH config
@@ -471,6 +468,12 @@ Add-Content -Path "$sshConfigDir\config" -Value $sshConfig
 
 Write-Host "SSH config updated with project SSH key path" -ForegroundColor Green
 ```
+
+**Note about StrictHostKeyChecking:**
+- `accept-new` will automatically accept and save host keys on first connection
+- You'll see a "Warning: Permanently added..." message ONCE per host
+- Subsequent connections will be silent (no warnings)
+- This is the recommended setting for known, trusted hosts
 
 ### Step 5: Test SSH Access
 
@@ -485,7 +488,31 @@ ssh k8s-worker1 "hostname && ip a"
 ssh k8s-worker2 "hostname && ip a"
 ```
 
-### Step 6: Configure /etc/hosts on All Nodes
+### Step 6: Configure Passwordless Sudo on All Nodes
+
+```powershell
+# Configure passwordless sudo on all nodes
+$K8S_USER = "k8s"
+$K8S_PASSWORD = "k8s"
+
+# k8s-control
+ssh k8s-control "echo '$K8S_PASSWORD' | sudo -S sh -c 'echo \`"$K8S_USER ALL=`(ALL`) NOPASSWD:ALL\`" | tee /etc/sudoers.d/$K8S_USER > /dev/null && chmod 0440 /etc/sudoers.d/$K8S_USER'"
+
+# k8s-worker1
+ssh k8s-worker1 "echo '$K8S_PASSWORD' | sudo -S sh -c 'echo \`"$K8S_USER ALL=`(ALL`) NOPASSWD:ALL\`" | tee /etc/sudoers.d/$K8S_USER > /dev/null && chmod 0440 /etc/sudoers.d/$K8S_USER'"
+
+# k8s-worker2
+ssh k8s-worker2 "echo '$K8S_PASSWORD' | sudo -S sh -c 'echo \`"$K8S_USER ALL=`(ALL`) NOPASSWD:ALL\`" | tee /etc/sudoers.d/$K8S_USER > /dev/null && chmod 0440 /etc/sudoers.d/$K8S_USER'"
+
+# Test passwordless sudo (should work without password now)
+ssh k8s-control "sudo whoami"  # Should output: root
+ssh k8s-worker1 "sudo whoami"  # Should output: root
+ssh k8s-worker2 "sudo whoami"  # Should output: root
+```
+
+**Note:** The backticks (`` ` ``) escape special characters in PowerShell. The `-S` flag tells sudo to read the password from stdin. We use `tee` to write to the protected directory with sudo privileges.
+
+### Step 7: Configure /etc/hosts on All Nodes
 
 ```powershell
 # Create hosts entries script
@@ -501,48 +528,7 @@ ssh k8s-worker1 "echo '$hostsEntries' | sudo tee -a /etc/hosts"
 ssh k8s-worker2 "echo '$hostsEntries' | sudo tee -a /etc/hosts"
 ```
 
-### Step 7: Configure Passwordless Sudo on All Nodes
-
-```powershell
-# Configure passwordless sudo on all nodes
-$K8S_USER = "k8s"
-ssh k8s-control "echo '$K8S_USER ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/$K8S_USER && sudo chmod 0440 /etc/sudoers.d/$K8S_USER"
-ssh k8s-worker1 "echo '$K8S_USER ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/$K8S_USER && sudo chmod 0440 /etc/sudoers.d/$K8S_USER"
-ssh k8s-worker2 "echo '$K8S_USER ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/$K8S_USER && sudo chmod 0440 /etc/sudoers.d/$K8S_USER"
-```
-
-### Step 8: Create PowerShell Helper Functions
-
-```powershell
-# Add to your PowerShell profile
-# Open profile: notepad $PROFILE
-
-# Function to execute commands on all nodes
-function Invoke-K8sClusterCommand {
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$Command
-    )
-    
-    $nodes = @("k8s-control", "k8s-worker1", "k8s-worker2")
-    
-    foreach ($node in $nodes) {
-        Write-Host "`n===================================" -ForegroundColor Cyan
-        Write-Host "Executing on: $node" -ForegroundColor Cyan
-        Write-Host "===================================" -ForegroundColor Cyan
-        ssh $node $Command
-    }
-}
-
-# Alias for convenience
-Set-Alias -Name k8s-exec -Value Invoke-K8sClusterCommand
-
-# Usage:
-# k8s-exec "uptime"
-# k8s-exec "sudo systemctl status kubelet"
-```
-
-### Step 9: Add Windows Hosts File Entries (Optional)
+### Step 8: Add Windows Hosts File Entries (Optional)
 
 ```powershell
 # Run as Administrator
