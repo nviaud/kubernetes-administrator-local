@@ -118,6 +118,40 @@ This environment is designed for practicing CKA exam topics:
 - Troubleshooting
 - Cluster maintenance
 
+## AI-Assisted Administration (Recommended)
+
+**Using LLM Agents like Claude Code:**
+
+This environment is optimized for AI-assisted cluster management from your Windows host. LLM agents can help you throughout the entire workflow:
+
+**Installation & Setup:**
+- Execute installation procedures step-by-step
+- Handle SSH connections and remote commands
+- Troubleshoot configuration issues in real-time
+
+**Cluster Operations:**
+- Connect to nodes via SSH to investigate issues
+- Execute kubectl commands on the cluster
+- Debug pod failures and network issues
+- Analyze logs and system state
+
+**Why it works well:**
+- SSH configuration allows agents to connect directly to nodes
+- Context files (`CLAUDE.md`) provide cluster information
+- Shared folder enables easy file transfer between host and VMs
+- Passwordless sudo allows automated troubleshooting
+
+**Example workflow:**
+```
+"Check why pods are not starting on k8s-worker1"
+→ Agent connects via SSH
+→ Checks kubelet logs
+→ Identifies certificate issue
+→ Fixes and verifies resolution
+```
+
+The agent can execute commands, read logs, and suggest fixes without manual intervention, making this an excellent environment for learning cluster administration with AI assistance.
+
 ## Notes
 
 - This is a **local training environment** - not for production use
