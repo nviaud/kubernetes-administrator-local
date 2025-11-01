@@ -670,75 +670,6 @@ foreach ($node in $nodes) {
 }
 ```
 
-### Shared Folder Usage Examples
-
-```powershell
-# Copy Kubernetes manifests from Windows to VMs
-Copy-Item -Path ".\my-deployment.yaml" -Destination ".\"
-ssh k8s-control "kubectl apply -f /mnt/shared/my-deployment.yaml"
-
-# Copy logs from VMs to Windows
-ssh k8s-control "sudo journalctl -u kubelet --no-pager > /mnt/shared/kubelet.log"
-Get-Content ".\kubelet.log"
-
-# Share configuration files
-Copy-Item -Path "$env:USERPROFILE\.kube\config" -Destination ".\kubeconfig"
-ssh k8s-worker1 "cat /mnt/shared/kubeconfig"
-
-# Transfer files between host and cluster
-# From Windows to cluster:
-Copy-Item -Path ".\local-file.txt" -Destination ".\"
-
-# From cluster to Windows:
-ssh k8s-control "cp /var/log/syslog /mnt/shared/syslog.txt"
-```
-
-### Create PowerShell Helper Function for Shared Folder
-
-```powershell
-# Add to PowerShell profile
-function Copy-ToK8sCluster {
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$SourcePath,
-        [string]$DestinationName
-    )
-
-    $SharedPath = $PWD.Path
-    
-    if ([string]::IsNullOrEmpty($DestinationName)) {
-        $DestinationName = Split-Path $SourcePath -Leaf
-    }
-    
-    Copy-Item -Path $SourcePath -Destination "$SharedPath\$DestinationName"
-    Write-Host "Copied to shared folder. Access from VMs at: /mnt/shared/$DestinationName" -ForegroundColor Green
-}
-
-function Copy-FromK8sCluster {
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$FileName,
-        [string]$DestinationPath = "."
-    )
-
-    $SharedPath = $PWD.Path
-    $SourceFile = "$SharedPath\$FileName"
-    
-    if (Test-Path $SourceFile) {
-        Copy-Item -Path $SourceFile -Destination $DestinationPath
-        Write-Host "Copied from shared folder to: $DestinationPath" -ForegroundColor Green
-    } else {
-        Write-Host "File not found in shared folder: $FileName" -ForegroundColor Red
-    }
-}
-
-# Usage:
-# Copy-ToK8sCluster -SourcePath ".\deployment.yaml"
-# Copy-FromK8sCluster -FileName "kubelet.log" -DestinationPath ".\logs\"
-```
-
----
-
 ## Phase 5: OS Configuration (Run on ALL Nodes via SSH)
 
 ### Step 1: Update System on All Nodes
@@ -840,10 +771,10 @@ foreach ($node in $nodes) {
 ```powershell
 $installK8s = @"
 # Add Kubernetes GPG key
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.33/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
 # Add Kubernetes repository
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
 # Install kubelet, kubeadm, kubectl
 sudo apt update
@@ -862,26 +793,66 @@ foreach ($node in $nodes) {
 }
 ```
 
+### Step 7: Install HELM on All Nodes
+
+```powershell
+$installHelm = @"
+# Install HELM using official script
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Verify installation
+helm version --short
+"@
+
+foreach ($node in $nodes) {
+    Write-Host "Installing HELM on $node..." -ForegroundColor Green
+    ssh $node $installHelm
+}
+```
+
+### Step 8: Install K9S on All Nodes
+
+```powershell
+$installK9s = @"
+# Get latest K9S version
+K9S_VERSION=\$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep tag_name | cut -d '\"' -f 4)
+
+# Download and install K9S
+curl -L https://github.com/derailed/k9s/releases/download/\${K9S_VERSION}/k9s_Linux_amd64.tar.gz -o /tmp/k9s.tar.gz
+tar xzf /tmp/k9s.tar.gz -C /tmp
+sudo mv /tmp/k9s /usr/local/bin/
+sudo chmod +x /usr/local/bin/k9s
+rm /tmp/k9s.tar.gz /tmp/LICENSE /tmp/README.md
+
+# Verify installation
+k9s version
+"@
+
+foreach ($node in $nodes) {
+    Write-Host "Installing K9S on $node..." -ForegroundColor Green
+    ssh $node $installK9s
+}
+```
+
+**Note:**
+- **HELM** is the package manager for Kubernetes, essential for deploying applications and managing complex deployments
+- **K9S** is a terminal-based UI for managing Kubernetes clusters, making it easier to navigate and troubleshoot
+
 ---
 
 ## Phase 6: Initialize Kubernetes Cluster
 
 ### Step 1: Initialize Control Plane
 
+The project includes a `kubeadm-config.yaml` file with the same configuration. Using a config file is the recommended approach for the CKA exam:
+
 ```powershell
-Write-Host "Initializing Kubernetes control plane..." -ForegroundColor Green
+Write-Host "Initializing Kubernetes control plane with config file..." -ForegroundColor Green
 
-$initCommand = @"
-sudo kubeadm init \
-  --pod-network-cidr=10.244.0.0/16 \
-  --apiserver-advertise-address=192.168.56.10 \
-  --control-plane-endpoint=192.168.56.10
-"@
+# Initialize with config file
+ssh k8s-control "sudo kubeadm init --config /mnt/shared/cluster-config/kubeadm-config.yaml | tee /mnt/shared/out/kubeadm-init.out"
 
-# Initialize and capture output
-ssh k8s-control $initCommand | Tee-Object -FilePath "$env:USERPROFILE\k8s-init-output.txt"
-
-Write-Host "`nInitialization output saved to: $env:USERPROFILE\k8s-init-output.txt" -ForegroundColor Yellow
+Write-Host "`nInitialization output saved to: out/kubeadm-init.out" -ForegroundColor Yellow
 Write-Host "IMPORTANT: Save the kubeadm join command from the output!" -ForegroundColor Red
 ```
 
@@ -905,24 +876,17 @@ ssh k8s-control "kubectl get nodes"
 ```powershell
 Write-Host "Installing Cilium CNI..." -ForegroundColor Green
 
-# Install Cilium CLI on control plane
-ssh k8s-control @"
-CILIUM_CLI_VERSION=\$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
-CLI_ARCH=amd64
-curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/\${CILIUM_CLI_VERSION}/cilium-linux-\${CLI_ARCH}.tar.gz{,.sha256sum}
-sha256sum --check cilium-linux-\${CLI_ARCH}.tar.gz.sha256sum
-sudo tar xzvfC cilium-linux-\${CLI_ARCH}.tar.gz /usr/local/bin
-rm cilium-linux-\${CLI_ARCH}.tar.gz{,.sha256sum}
-"@
+# Install Cilium using manifest
+ssh k8s-control "kubectl apply -f /mnt/shared/cluster-config/cilium-cni.yaml"
 
-# Install Cilium
-ssh k8s-control "cilium install --version 1.16.5"
-
-# Wait for Cilium to be ready
-ssh k8s-control "cilium status --wait"
+# Wait for Cilium pods to be ready
+ssh k8s-control "kubectl wait --for=condition=ready pod -l k8s-app=cilium -n kube-system --timeout=300s"
 
 # Wait for CoreDNS to be ready
 ssh k8s-control "kubectl wait --for=condition=ready pod -l k8s-app=kube-dns -n kube-system --timeout=300s"
+
+# Verify Cilium installation
+ssh k8s-control "kubectl get pods -n kube-system -l k8s-app=cilium"
 ```
 
 **Note:** Cilium provides advanced networking features including:
@@ -940,10 +904,6 @@ $joinCommand = ssh k8s-control "kubeadm token create --print-join-command"
 
 Write-Host "`nJoin Command:" -ForegroundColor Yellow
 Write-Host $joinCommand -ForegroundColor Cyan
-
-# Save join command
-$joinCommand | Out-File -FilePath "$env:USERPROFILE\k8s-join-command.txt"
-Write-Host "`nJoin command saved to: $env:USERPROFILE\k8s-join-command.txt" -ForegroundColor Green
 ```
 
 ### Step 5: Join Worker Nodes
@@ -993,7 +953,7 @@ Write-Host "Kubeconfig copied to: $env:USERPROFILE\.kube\config" -ForegroundColo
 
 ```powershell
 # Download kubectl
-$kubectlVersion = "v1.31.0"
+$kubectlVersion = "v1.33.1"
 $kubectlUrl = "https://dl.k8s.io/release/$kubectlVersion/bin/windows/amd64/kubectl.exe"
 
 # Download to a directory in PATH (e.g., C:\Windows\System32 or create custom dir)
@@ -1200,7 +1160,7 @@ foreach ($node in @("k8s-control", "k8s-worker1", "k8s-worker2")) {
 **Host-Only Network**: 192.168.56.0/24
 **Gateway**: 192.168.56.1
 **DHCP**: Enabled with MAC-based IP reservations (192.168.56.100-200 range)
-**Pod Network CIDR**: 10.244.0.0/16
+**Pod Network CIDR**: 192.168.0.0/16
 **Service CIDR**: 10.96.0.0/12 (default)
 **CNI Plugin**: Cilium (eBPF-based networking)
 

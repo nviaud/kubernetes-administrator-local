@@ -19,7 +19,7 @@ This project is dedicated to preparing for the **Certified Kubernetes Administra
 - **Container Runtime**: containerd
 - **CNI Plugin**: Cilium
 - **Cluster Management**: kubeadm
-- **Kubernetes Version**: v1.31
+- **Kubernetes Version**: v1.33.1
 
 ## Project Scope
 This environment will be used to practice CKA exam topics including:

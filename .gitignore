@@ -1,1 +1,9 @@
 .claude
+
+# Procedure test files
+test.txt
+from-vm.txt
+
+# CKA files
+LFS258
+LAB_3.1.pdf
