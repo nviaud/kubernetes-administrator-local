@@ -900,16 +900,36 @@ ssh k8s-control $configKubectl
 ssh k8s-control "kubectl get nodes"
 ```
 
-### Step 3: Install Pod Network Add-on (Flannel)
+### Step 3: Install Pod Network Add-on (Cilium)
 
 ```powershell
-Write-Host "Installing Flannel CNI..." -ForegroundColor Green
+Write-Host "Installing Cilium CNI..." -ForegroundColor Green
 
-ssh k8s-control "kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml"
+# Install Cilium CLI on control plane
+ssh k8s-control @"
+CILIUM_CLI_VERSION=\$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+CLI_ARCH=amd64
+curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/\${CILIUM_CLI_VERSION}/cilium-linux-\${CLI_ARCH}.tar.gz{,.sha256sum}
+sha256sum --check cilium-linux-\${CLI_ARCH}.tar.gz.sha256sum
+sudo tar xzvfC cilium-linux-\${CLI_ARCH}.tar.gz /usr/local/bin
+rm cilium-linux-\${CLI_ARCH}.tar.gz{,.sha256sum}
+"@
 
-# Wait for CoreDNS
+# Install Cilium
+ssh k8s-control "cilium install --version 1.16.5"
+
+# Wait for Cilium to be ready
+ssh k8s-control "cilium status --wait"
+
+# Wait for CoreDNS to be ready
 ssh k8s-control "kubectl wait --for=condition=ready pod -l k8s-app=kube-dns -n kube-system --timeout=300s"
 ```
+
+**Note:** Cilium provides advanced networking features including:
+- eBPF-based networking and security
+- Network policies
+- Load balancing
+- Observability with Hubble
 
 ### Step 4: Get Join Command
 
@@ -1182,6 +1202,7 @@ foreach ($node in @("k8s-control", "k8s-worker1", "k8s-worker2")) {
 **DHCP**: Enabled with MAC-based IP reservations (192.168.56.100-200 range)
 **Pod Network CIDR**: 10.244.0.0/16
 **Service CIDR**: 10.96.0.0/12 (default)
+**CNI Plugin**: Cilium (eBPF-based networking)
 
 ---
 
