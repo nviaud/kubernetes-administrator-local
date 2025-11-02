@@ -93,10 +93,11 @@ VBoxManage controlvm k8s-worker2 poweroff
 .
 ├── README.md                           # This file
 ├── INSTALLATION_PROCEDURE_WINDOWS.md   # Complete setup guide
-├── provision-vms.ps1                   # VM provisioning script
+├── scripts                             # Scripts automating the setup guide
+│   ├── phase1-provision-vms.ps1        # VM provisioning script
 ├── cluster-config/                     # Cluster configuration files
-│   ├── kubeadm-config.yaml            # Kubeadm init configuration
-│   └── cilium-cni.yaml                # Cilium CNI manifest
+│   ├── kubeadm-config.yaml             # Kubeadm init configuration
+│   └── cilium-cni.yaml                 # Cilium CNI manifest
 ├── docs/                               # Documentation
 └── .ssh/                               # SSH keys for cluster access
 ```

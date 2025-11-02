@@ -35,6 +35,29 @@ VBoxManage --version
 
 ---
 
+## PowerShell Scripting Notes
+
+When using PowerShell here-strings `@"..."@` to pass bash scripts via SSH, you must escape dollar signs with backticks (`` ` ``) to prevent PowerShell from evaluating them locally on Windows.
+
+**Escaping Rules:**
+- Bash command substitution: `$(command)` → `` `$(command) ``
+- Bash variable expansion: `${variable}` → `` `${variable} ``
+- Bash variables: `$VARIABLE` → `` `$VARIABLE ``
+
+**Example:**
+```powershell
+# Correct - backticks prevent PowerShell from evaluating bash expressions
+$script = @"
+echo \"Architecture: `$(dpkg --print-architecture)\"
+K9S_VERSION=`$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep tag_name | cut -d '\"' -f 4)
+echo \"Home: `$HOME\"
+"@
+
+ssh k8s-control $script
+```
+
+---
+
 ## Phase 1: VM Provisioning with VirtualBox CLI
 
 **Quick Start**: Use the provided `provision-vms.ps1` script to automate all VM provisioning steps:
@@ -674,6 +697,7 @@ foreach ($node in $nodes) {
 
 ### Step 1: Update System on All Nodes
 
+**From Windows (PowerShell):**
 ```powershell
 # Update all nodes
 $nodes = @("k8s-control", "k8s-worker1", "k8s-worker2")
@@ -683,8 +707,14 @@ foreach ($node in $nodes) {
 }
 ```
 
+**Directly on each Linux node:**
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
 ### Step 2: Disable Swap on All Nodes
 
+**From Windows (PowerShell):**
 ```powershell
 foreach ($node in $nodes) {
     Write-Host "Disabling swap on $node..." -ForegroundColor Green
@@ -692,8 +722,15 @@ foreach ($node in $nodes) {
 }
 ```
 
+**Directly on each Linux node:**
+```bash
+sudo swapoff -a
+sudo sed -i '/ swap / s/^\(.*\)$/# \1/g' /etc/fstab
+```
+
 ### Step 3: Load Kernel Modules on All Nodes
 
+**From Windows (PowerShell):**
 ```powershell
 $kernelModules = @"
 cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
@@ -711,8 +748,20 @@ foreach ($node in $nodes) {
 }
 ```
 
+**Directly on each Linux node:**
+```bash
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+
+sudo modprobe overlay
+sudo modprobe br_netfilter
+```
+
 ### Step 4: Configure Kernel Parameters on All Nodes
 
+**From Windows (PowerShell):**
 ```powershell
 $kernelParams = @"
 cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
@@ -730,8 +779,20 @@ foreach ($node in $nodes) {
 }
 ```
 
+**Directly on each Linux node:**
+```bash
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+
+sudo sysctl --system
+```
+
 ### Step 5: Install Container Runtime (containerd) on All Nodes
 
+**From Windows (PowerShell):**
 ```powershell
 $installContainerd = @"
 # Install dependencies
@@ -742,7 +803,7 @@ sudo mkdir -p /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
 # Add Docker repository
-echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+echo \"deb [arch=`$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu `$(lsb_release -cs) stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 # Install containerd
 sudo apt update
@@ -766,8 +827,37 @@ foreach ($node in $nodes) {
 }
 ```
 
+**Directly on each Linux node:**
+```bash
+# Install dependencies
+sudo apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
+
+# Add Docker GPG key
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+# Add Docker repository
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install containerd
+sudo apt update
+sudo apt install -y containerd.io
+
+# Configure containerd
+sudo mkdir -p /etc/containerd
+containerd config default | sudo tee /etc/containerd/config.toml
+
+# Enable SystemdCgroup
+sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+
+# Restart containerd
+sudo systemctl restart containerd
+sudo systemctl enable containerd
+```
+
 ### Step 6: Install Kubernetes Components on All Nodes
 
+**From Windows (PowerShell):**
 ```powershell
 $installK8s = @"
 # Add Kubernetes GPG key
@@ -793,8 +883,28 @@ foreach ($node in $nodes) {
 }
 ```
 
+**Directly on each Linux node:**
+```bash
+# Add Kubernetes GPG key
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.33/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+# Add Kubernetes repository
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+# Install kubelet, kubeadm, kubectl
+sudo apt update
+sudo apt install -y kubelet kubeadm kubectl
+
+# Hold packages at current version
+sudo apt-mark hold kubelet kubeadm kubectl
+
+# Enable kubelet
+sudo systemctl enable kubelet
+```
+
 ### Step 7: Install HELM on All Nodes
 
+**From Windows (PowerShell):**
 ```powershell
 $installHelm = @"
 # Install HELM using official script
@@ -810,15 +920,25 @@ foreach ($node in $nodes) {
 }
 ```
 
+**Directly on each Linux node:**
+```bash
+# Install HELM using official script
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Verify installation
+helm version --short
+```
+
 ### Step 8: Install K9S on All Nodes
 
+**From Windows (PowerShell):**
 ```powershell
 $installK9s = @"
 # Get latest K9S version
-K9S_VERSION=\$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep tag_name | cut -d '\"' -f 4)
+K9S_VERSION=`$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep tag_name | cut -d '\"' -f 4)
 
 # Download and install K9S
-curl -L https://github.com/derailed/k9s/releases/download/\${K9S_VERSION}/k9s_Linux_amd64.tar.gz -o /tmp/k9s.tar.gz
+curl -L https://github.com/derailed/k9s/releases/download/`${K9S_VERSION}/k9s_Linux_amd64.tar.gz -o /tmp/k9s.tar.gz
 tar xzf /tmp/k9s.tar.gz -C /tmp
 sudo mv /tmp/k9s /usr/local/bin/
 sudo chmod +x /usr/local/bin/k9s
@@ -834,6 +954,22 @@ foreach ($node in $nodes) {
 }
 ```
 
+**Directly on each Linux node:**
+```bash
+# Get latest K9S version
+K9S_VERSION=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep tag_name | cut -d '"' -f 4)
+
+# Download and install K9S
+curl -L https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_Linux_amd64.tar.gz -o /tmp/k9s.tar.gz
+tar xzf /tmp/k9s.tar.gz -C /tmp
+sudo mv /tmp/k9s /usr/local/bin/
+sudo chmod +x /usr/local/bin/k9s
+rm /tmp/k9s.tar.gz /tmp/LICENSE /tmp/README.md
+
+# Verify installation
+k9s version
+```
+
 **Note:**
 - **HELM** is the package manager for Kubernetes, essential for deploying applications and managing complex deployments
 - **K9S** is a terminal-based UI for managing Kubernetes clusters, making it easier to navigate and troubleshoot
@@ -846,6 +982,7 @@ foreach ($node in $nodes) {
 
 The project includes a `kubeadm-config.yaml` file with the same configuration. Using a config file is the recommended approach for the CKA exam:
 
+**From Windows (PowerShell):**
 ```powershell
 Write-Host "Initializing Kubernetes control plane with config file..." -ForegroundColor Green
 
@@ -856,13 +993,22 @@ Write-Host "`nInitialization output saved to: out/kubeadm-init.out" -ForegroundC
 Write-Host "IMPORTANT: Save the kubeadm join command from the output!" -ForegroundColor Red
 ```
 
+**Directly on k8s-control node:**
+```bash
+# Initialize with config file
+sudo kubeadm init --config /mnt/shared/cluster-config/kubeadm-config.yaml | tee /mnt/shared/out/kubeadm-init.out
+
+# IMPORTANT: Save the kubeadm join command from the output!
+```
+
 ### Step 2: Configure kubectl on Control Plane
 
+**From Windows (PowerShell):**
 ```powershell
 $configKubectl = @"
-mkdir -p \$HOME/.kube
-sudo cp -i /etc/kubernetes/admin.conf \$HOME/.kube/config
-sudo chown \$(id -u):\$(id -g) \$HOME/.kube/config
+mkdir -p `$HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf `$HOME/.kube/config
+sudo chown `$(id -u):`$(id -g) `$HOME/.kube/config
 "@
 
 ssh k8s-control $configKubectl
@@ -871,8 +1017,19 @@ ssh k8s-control $configKubectl
 ssh k8s-control "kubectl get nodes"
 ```
 
+**Directly on k8s-control node:**
+```bash
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+# Verify
+kubectl get nodes
+```
+
 ### Step 3: Install Pod Network Add-on (Cilium)
 
+**From Windows (PowerShell):**
 ```powershell
 Write-Host "Installing Cilium CNI..." -ForegroundColor Green
 
@@ -889,6 +1046,21 @@ ssh k8s-control "kubectl wait --for=condition=ready pod -l k8s-app=kube-dns -n k
 ssh k8s-control "kubectl get pods -n kube-system -l k8s-app=cilium"
 ```
 
+**Directly on k8s-control node:**
+```bash
+# Install Cilium using manifest
+kubectl apply -f /mnt/shared/cluster-config/cilium-cni.yaml
+
+# Wait for Cilium pods to be ready
+kubectl wait --for=condition=ready pod -l k8s-app=cilium -n kube-system --timeout=300s
+
+# Wait for CoreDNS to be ready
+kubectl wait --for=condition=ready pod -l k8s-app=kube-dns -n kube-system --timeout=300s
+
+# Verify Cilium installation
+kubectl get pods -n kube-system -l k8s-app=cilium
+```
+
 **Note:** Cilium provides advanced networking features including:
 - eBPF-based networking and security
 - Network policies
@@ -897,6 +1069,7 @@ ssh k8s-control "kubectl get pods -n kube-system -l k8s-app=cilium"
 
 ### Step 4: Get Join Command
 
+**From Windows (PowerShell):**
 ```powershell
 Write-Host "`nGenerating join command for worker nodes..." -ForegroundColor Green
 
@@ -906,8 +1079,15 @@ Write-Host "`nJoin Command:" -ForegroundColor Yellow
 Write-Host $joinCommand -ForegroundColor Cyan
 ```
 
+**Directly on k8s-control node:**
+```bash
+# Generate join command
+kubeadm token create --print-join-command
+```
+
 ### Step 5: Join Worker Nodes
 
+**From Windows (PowerShell):**
 ```powershell
 Write-Host "`nJoining worker nodes to cluster..." -ForegroundColor Green
 
@@ -926,11 +1106,25 @@ Start-Sleep -Seconds 10
 ssh k8s-control "kubectl get nodes"
 ```
 
+**Directly on each worker node:**
+```bash
+# Run the join command generated in Step 4 (example):
+sudo kubeadm join 192.168.56.10:6443 --token <token> \
+    --discovery-token-ca-cert-hash sha256:<hash>
+```
+
 ### Step 6: Label Worker Nodes
 
+**From Windows (PowerShell):**
 ```powershell
 ssh k8s-control "kubectl label node k8s-worker1 node-role.kubernetes.io/worker=worker"
 ssh k8s-control "kubectl label node k8s-worker2 node-role.kubernetes.io/worker=worker"
+```
+
+**Directly on k8s-control node:**
+```bash
+kubectl label node k8s-worker1 node-role.kubernetes.io/worker=worker
+kubectl label node k8s-worker2 node-role.kubernetes.io/worker=worker
 ```
 
 ---
