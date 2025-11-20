@@ -693,7 +693,7 @@ foreach ($node in $nodes) {
 }
 ```
 
-## Phase 5: OS Configuration (Run on ALL Nodes via SSH)
+## Phase 5: OS Configuration
 
 ### Step 1: Update System on All Nodes
 
@@ -816,6 +816,9 @@ containerd config default | sudo tee /etc/containerd/config.toml
 # Enable SystemdCgroup
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
 
+# Configure pause container image
+sudo sed -i 's|sandbox_image = .*|sandbox_image = \"registry.k8s.io/pause:3.10\"|g' /etc/containerd/config.toml
+
 # Restart containerd
 sudo systemctl restart containerd
 sudo systemctl enable containerd
@@ -850,10 +853,19 @@ containerd config default | sudo tee /etc/containerd/config.toml
 # Enable SystemdCgroup
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
 
+# Configure pause container image
+sudo sed -i 's|sandbox_image = .*|sandbox_image = "registry.k8s.io/pause:3.10"|g' /etc/containerd/config.toml
+
 # Restart containerd
 sudo systemctl restart containerd
 sudo systemctl enable containerd
 ```
+
+**Note about pause container:**
+- The pause container is used by Kubernetes to hold network namespaces for pods
+- Default containerd uses `registry.k8s.io/pause:3.9` or similar
+- For CKA exam compatibility, we explicitly set it to `registry.k8s.io/pause:3.10`
+- This ensures consistency across all nodes and matches Kubernetes expectations
 
 ### Step 6: Install Kubernetes Components on All Nodes
 
@@ -1297,6 +1309,53 @@ foreach ($node in $nodes) {
 ---
 
 ## Troubleshooting
+
+### SSH Connection Timeout / Cannot Connect to Nodes
+
+**Problem**: SSH connection times out when trying to connect to nodes (k8s-control, k8s-worker1, k8s-worker2)
+
+**Root Cause**: VirtualBox Host-Only Ethernet Adapter has wrong IP address or Windows adds a link-local IP (169.254.x.x) that interferes.
+
+**Diagnosis**:
+```powershell
+# Check if nodes are reachable
+Test-NetConnection -ComputerName 192.168.56.10 -Port 22
+
+# Check host-only adapter configuration
+VBoxManage list hostonlyifs
+
+# Check Windows adapter IP addresses (find by description, not alias)
+$adapter = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like '*VirtualBox*Host*' }
+Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4
+```
+
+**Solution 1: Quick Fix (Run as Administrator)**:
+```powershell
+# Remove link-local IP
+$adapter = Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'VirtualBox.*Host' }
+Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 |
+    Where-Object { $_.IPAddress -like '169.254.*' } |
+    Remove-NetIPAddress -Confirm:$false
+
+# Ensure correct IP is set
+VBoxManage hostonlyif ipconfig "VirtualBox Host-Only Ethernet Adapter" --ip 192.168.56.1 --netmask 255.255.255.0
+```
+
+**Solution 2: Manual via GUI**:
+1. Open Network Connections (`ncpa.cpl`)
+2. Right-click "VirtualBox Host-Only Ethernet Adapter" → Properties
+3. Double-click "Internet Protocol Version 4 (TCP/IPv4)"
+4. Select "Use the following IP address":
+   - IP address: `192.168.56.1`
+   - Subnet mask: `255.255.255.0`
+5. Click OK
+
+**If problem persists**, restart the VMs:
+```powershell
+VBoxManage controlvm k8s-control reset
+VBoxManage controlvm k8s-worker1 reset
+VBoxManage controlvm k8s-worker2 reset
+```
 
 ### Check VM Status
 

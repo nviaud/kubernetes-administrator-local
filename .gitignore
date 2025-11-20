@@ -7,3 +7,5 @@ from-vm.txt
 # CKA files
 LFS258
 LAB_*.pdf
+
+out/kubeadm-init.out
